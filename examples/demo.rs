@@ -2,12 +2,13 @@
  * Emyzelium (Rust)
  *
  * is another wrapper around ZeroMQ's Publish-Subscribe messaging pattern
- * with mandatory Curve security and optional ZAP authentication filter
- * over Tor, using Tor SOCKS5 proxy,
+ * with mandatory Curve security and optional ZAP authentication filter,
+ * over Tor, through Tor SOCKS proxy,
  * for distributed artificial elife, decision making etc. systems where
- * each peer, identified by its onion address, port, and public key,
- * provides and updates vectors of vectors of bytes
- * under unique topics that other peers can subscribe to and receive.
+ * each peer, identified by its public key, onion address, and port,
+ * publishes and updates vectors of vectors of bytes of data
+ * under unique topics that other peers can subscribe to
+ * and receive the respective data.
  * 
  * https://github.com/emyzelium/emyzelium-rs
  * 
@@ -29,7 +30,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
- /*
+/*
  * Demo
  */
 
@@ -228,9 +229,15 @@ impl Realm_CA {
         self.others.push(Other::new(name, publickey));
     }
 
-    fn flip(&mut self, y: i16, x: i16) {
-        let fy = if y < 0 {self.cursor_y} else {y};
-        let fx = if x < 0 {self.cursor_x} else {x};
+    fn flip(&mut self, y: Option<i16>, x: Option<i16>) {        
+        let fy = match y {
+            Some(y) => y,
+            None => self.cursor_y
+        };
+        let fx = match x {
+            Some(x) => x,
+            None => self.cursor_x
+        };
         self.cells[fy as usize][fx as usize] ^= 1;
     }
 
@@ -510,7 +517,7 @@ impl Realm_CA {
                                         self.turn();
                                     },
                                     ' ' => {
-                                        self.flip(-1, -1);
+                                        self.flip(None, None);
                                     },
                                     _ => {}
                                 }
@@ -543,8 +550,8 @@ fn run_realm(name: &str) -> Result<(), String> {
         that1_name, that1_publickey, that1_onion, that1_port,
         that2_name, that2_publickey, that2_onion, that2_port,
         birth, survival
-    ) = match name {
-        "Alien" => {
+    ) = match name.to_ascii_uppercase().as_str() {
+        "ALIEN" => {
             (
                 ALIEN_SECRETKEY, ALIEN_PORT,
                 "John", JOHN_PUBLICKEY, JOHN_ONION, JOHN_PORT,
@@ -552,7 +559,7 @@ fn run_realm(name: &str) -> Result<(), String> {
                 HashSet::<usize>::from([3, 4]), HashSet::<usize>::from([3, 4]) // 3-4 Life
             )
         },
-        "John" => {
+        "JOHN" => {
             (
                 JOHN_SECRETKEY, JOHN_PORT,
                 "Alien", ALIEN_PUBLICKEY, ALIEN_ONION, ALIEN_PORT,
@@ -560,7 +567,7 @@ fn run_realm(name: &str) -> Result<(), String> {
                 HashSet::<usize>::from([3]), HashSet::<usize>::from([2, 3]) // classic Conway's Life
             )
         },
-        "Mary" => {
+        "MARY" => {
             (
                 MARY_SECRETKEY, MARY_PORT,
                 "Alien", ALIEN_PUBLICKEY, ALIEN_ONION, ALIEN_PORT,
@@ -584,6 +591,9 @@ fn run_realm(name: &str) -> Result<(), String> {
     };
 
     let mut realm = Realm_CA::new(name, secretkey, & HashSet::new(), pubport, height, width, &birth, &survival, DEF_AUTOEMIT_INTERVAL, DEF_FRAMERATE);
+
+    // Uncomment to restrict: Alien gets data from John and Mary; John gets data from Alien but not from Mary; Mary gets data from neither Alien, nor John
+    // realm.efunguz.add_whitelist_publickeys(& HashSet::from([String::from(that1_publickey)]));
 
     realm.add_other(that1_name, that1_publickey, that1_onion, that1_port);
 	realm.add_other(that2_name, that2_publickey, that2_onion, that2_port);

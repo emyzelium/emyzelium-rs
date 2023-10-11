@@ -2,12 +2,13 @@
  * Emyzelium (Rust)
  *
  * is another wrapper around ZeroMQ's Publish-Subscribe messaging pattern
- * with mandatory Curve security and optional ZAP authentication filter
- * over Tor, using Tor SOCKS5 proxy,
+ * with mandatory Curve security and optional ZAP authentication filter,
+ * over Tor, through Tor SOCKS proxy,
  * for distributed artificial elife, decision making etc. systems where
- * each peer, identified by its onion address, port, and public key,
- * provides and updates vectors of vectors of bytes
- * under unique topics that other peers can subscribe to and receive.
+ * each peer, identified by its public key, onion address, and port,
+ * publishes and updates vectors of vectors of bytes of data
+ * under unique topics that other peers can subscribe to
+ * and receive the respective data.
  * 
  * https://github.com/emyzelium/emyzelium-rs
  * 
@@ -33,6 +34,9 @@
  * Source
  */
 
+extern crate rand;
+
+use rand::prelude::*;
 
 #[allow(unused_imports)]
 use std::{
@@ -75,6 +79,7 @@ const ZMQ_ROUTING_ID: c_int = 5;
 const ZMQ_SOCKS_PROXY: c_int = 68;
 const ZMQ_SUBSCRIBE: c_int = 6;
 const ZMQ_UNSUBSCRIBE: c_int = 7;
+const ZMQ_ZAP_DOMAIN: c_int = 55;
 
 // Message options
 const ZMQ_MORE: c_int = 1;
@@ -114,7 +119,7 @@ extern "C" {
 }
 
 pub const LIB_VERSION: &str = "0.9.2";
-pub const LIB_DATE: &str = "2023.10.10";
+pub const LIB_DATE: &str = "2023.10.11";
 
 pub const DEF_PUBSUB_PORT: u16 = 0xEDAF; // 60847
 
@@ -127,7 +132,11 @@ const KEY_BIN_LEN: usize = 32;
 
 const DEF_IPV6_STATUS: c_int = 1;
 const DEF_LINGER: c_int = 1;
-const ROUTING_ID_PUBSUB: &str = "pubsub";
+
+const CURVE_MECHANISM_ID: &str = "CURVE"; // See https://rfc.zeromq.org/spec/27/
+const ZAP_DOMAIN: &str = "emyz";
+
+const ZAP_SESSION_ID_LEN: usize = 32;
 
 const ERR_ALREADY_PRESENT: &str = "already present";
 const ERR_ALREADY_ABSENT: &str = "already absent";
@@ -179,6 +188,7 @@ pub struct Efunguz {
     context: *mut c_void,
     zapsock: *mut c_void,
     zappollitem: zmq_pollitem_t,
+    zap_session_id: Vec<u8>,
     pubsock: *mut c_void
 }
 
@@ -495,6 +505,7 @@ impl Efunguz {
             zmq_ctx_set(context, ZMQ_IPV6, DEF_IPV6_STATUS);
         }
 
+        // At first, REP socket for ZAP auth...
         let zapsock = unsafe {
             zmq_socket(context, ZMQ_REP)
         };
@@ -504,6 +515,10 @@ impl Efunguz {
 
         let zappollitem = zmq_pollitem_t::new_pollin(zapsock);
 
+        let mut zap_session_id = vec![0u8; ZAP_SESSION_ID_LEN];
+        thread_rng().fill_bytes(&mut zap_session_id); // must be cryptographically random... is it?
+
+        // ..and only then, PUB socket
         let pubsock = unsafe {
             zmq_socket(context, ZMQ_PUB)
         };
@@ -511,7 +526,8 @@ impl Efunguz {
         zmqe_setsockopt_int(pubsock, ZMQ_LINGER, DEF_LINGER);
         zmqe_setsockopt_int(pubsock, ZMQ_CURVE_SERVER, 1);
         zmqe_setsockopt_str(pubsock, ZMQ_CURVE_SECRETKEY, &secretkey);
-        zmqe_setsockopt_vec(pubsock, ZMQ_ROUTING_ID, & ROUTING_ID_PUBSUB.as_bytes().to_vec());
+        zmqe_setsockopt_vec(pubsock, ZMQ_ZAP_DOMAIN, & ZAP_DOMAIN.as_bytes().to_vec()); // to enable auth, must be non-empty due to ZMQ RFC 27
+        zmqe_setsockopt_vec(pubsock, ZMQ_ROUTING_ID, & zap_session_id); // to make sure only this pubsock can pass auth through zapsock; see update()
         zmqe_bind(pubsock, & format!("tcp://*:{}", pub_port));
 
         Self {
@@ -524,6 +540,7 @@ impl Efunguz {
             context,
             zapsock,
             zappollitem,
+            zap_session_id,
             pubsock
         }
     }
@@ -611,9 +628,10 @@ impl Efunguz {
             // let domain = request[2].clone();
             // let address = request[3].clone();
             let identity = request[4].clone();
-            // let mechanism = request[5].clone();
-            let key_u8 = request[6].clone();
+            let mechanism = request[5].clone();
+            let mut key_u8 = request[6].clone();
 
+            key_u8.truncate(KEY_BIN_LEN);
             let mut key_bufn = [0u8; KEY_Z85_CSTR_LEN];
             unsafe {
                 zmq_z85_encode(key_bufn.as_mut_ptr(), key_u8.as_ptr(), KEY_BIN_LEN);
@@ -623,7 +641,7 @@ impl Efunguz {
             reply.push(version);
             reply.push(sequence);
 
-            if (identity == ROUTING_ID_PUBSUB.as_bytes().to_vec()) && (self.whitelist_publickeys.is_empty() || self.whitelist_publickeys.contains(&key)) {
+            if (identity == self.zap_session_id) && (mechanism == CURVE_MECHANISM_ID.as_bytes().to_vec()) && (self.whitelist_publickeys.is_empty() || self.whitelist_publickeys.contains(&key)) {
                 // Auth passed; though needless (yet), set user-id to client's publickey
                 reply.push("200".as_bytes().to_vec());
                 reply.push("OK".as_bytes().to_vec());

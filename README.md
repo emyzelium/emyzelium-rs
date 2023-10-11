@@ -1,8 +1,8 @@
 # ![logo disk](https://github.com/emyzelium/visuals/blob/main/logo_disk_32.png) Emyzelium (Rust)
 
-is another wrapper around [ZeroMQ](https://zeromq.org/)'s [Publish-Subscribe](https://zeromq.org/socket-api/#publish-subscribe-pattern) messaging pattern with mandatory [Curve](https://rfc.zeromq.org/spec/26/) security and optional [ZAP](https://rfc.zeromq.org/spec/27/) authentication filter, over [Tor](https://torproject.org), through Tor SOCKS5 proxy, for distributed artificial elife, decision making etc. systems where each peer, identified by its onion address, port, and public key, provides and updates vectors of vectors of bytes under unique topics that other peers can subscribe to and receive.
+is another wrapper around [ZeroMQ](https://zeromq.org/)'s [Publish-Subscribe](https://zeromq.org/socket-api/#publish-subscribe-pattern) messaging pattern with mandatory [Curve](https://rfc.zeromq.org/spec/26/) security and optional [ZAP](https://rfc.zeromq.org/spec/27/) authentication filter, over [Tor](https://torproject.org), through Tor SOCKS proxy, for distributed artificial elife, decision making etc. systems where each peer, identified by its public key, onion address, and port, publishes and updates vectors of vectors of bytes of data under unique topics that other peers subscribe to and receive the respective data.
 
-Requires, of course, [Rust](https://rust-lang.org/) toolchain and [libzmq](https://github.com/zeromq/libzmq) ([more on build](http://wiki.zeromq.org/build:_start)).
+Requires [Rust toolchain](https://www.rust-lang.org/tools/install), [libzmq](https://github.com/zeromq/libzmq) ([more on build](http://wiki.zeromq.org/build:_start), but shared library from e.g. `libzmq5` in Linux may suffice), and [Tor](https://community.torproject.org/onion-services/setup/install/).
 
 Versions in other languages:
 
@@ -111,7 +111,7 @@ Then you should see something like this:
 
 ![Demo animation, Mary](https://github.com/emyzelium/visuals/blob/main/anim_demo_Mary.gif)
 
-As soon as Alien's, John's, and Mary's peers (*efungi*) have connected to each other via Tor, their cellular automatons (*realms*) can exchange cell regions (*etales*) not far from realtime.
+As soon as Alien's, John's, and Mary's peers (*efungi*) have established connections (*ehyphae*) to each other over Tor, their cellular automatons (*realms*) can exchange cell regions (*etales*) not far from realtime.
 
 Before the connections are established, SLUs (Since Last Update) are "large" (no updates yet); afterward they stay in 0–10 sec range. Press "1" or "2" to actually import updated region from other realm.
 
@@ -119,7 +119,7 @@ If you make that import automatic as well as emission, e.g. import from random o
 
 Note that birth/survival rules of Alien's CA, B34/S34, are different from classic B3/S23 of John's and Mary's CAs. In other words, although the "local geometry" of the realms is the same (Moore neigborhood), their "physics" are different.
 
-The names "Alien", "John", "Mary" are not required and are used for convenience. Each peer is identified by its onion, port, and public key.
+The names "Alien", "John", "Mary" are not required and are used for convenience. Each peer is identified by its public key, onion, and port.
 
 You can quit any of these 3 instances at any time and run it again after a while, the connections will be restored. The last "snapshot" of the region published by given peer is kept at each peer that has received it before being replaced by the next snapshot.
 
@@ -132,10 +132,10 @@ term1$ cargo run --release --example demo Alien
 by
 
 ```shell
-term1$ python3 demo.py Alien
+term1$ ./demo Alien
 ```
 
-from [Emyzelium in Python](https://github.com/emyzelium/emyzelium-py).
+from [Emyzelium in C++](https://github.com/emyzelium/emyzelium-cpp).
 
 ### On multiple PCs connected to Internet
 
@@ -264,7 +264,7 @@ So, *Efunguz*, *Ehypha*, and *Etale* are just fancy names of well known concepts
 
 ---
 
-**Efunguz**, a.k.a. peer, is the mediator between some "realm", represented by your program, and Tor network, represented by ZeroMQ on top of Tor SOCKS5 proxy, to which it talks. To the former, it simplifies security, (re)connection, and data flow tasks.
+**Efunguz**, a.k.a. peer, is the mediator between some "realm", represented by your program, and Tor network, represented by ZeroMQ on top of Tor SOCKS proxy, to which it talks. To the former, it simplifies security, (re)connection, and data flow tasks.
 
 The simplest way to construct efunguz is
 
@@ -273,7 +273,7 @@ let my_secretkey: &str = "gbMF0ZKztI28i6}ax!&Yw/US<CCA9PLs.Osr3APc";
 let mut efunguz = Efunguz::new(my_secretkey, & HashSet::new(), emz::DEF_PUBSUB_PORT, emz::DEF_TOR_PROXY_PORT, emz::DEF_TOR_PROXY_HOST);
 ```
 
-With authentication filter:
+More customisation:
 
 ```rust
 let whitelist_publickeys = HashSet::from([String::from("WR)%3-d9dw)%3VQ@O37dVe<09FuNzI{vh}Vfi+]0"), String::from("iGxlt)JYh!P9xPCY%BlY4Y]c^<=W)k^$T7GirF[R")]);
@@ -282,7 +282,7 @@ let mut efunguz = Efunguz::new(my_secretkey, &whitelist_publickeys, 54321, 9955,
 
 Now only the owners of secret keys corresponding to `whitelist_publickeys` will be able to subscribe to and receive etales of this efunguz. And they must connect to port `54321` instead of "default" one.
 
-By default whitelist is empty, which means... opposite to what you might have thought: everyone is allowed to subscribe.
+*By default whitelist is empty*, which means... opposite to what you might have thought: *everyone is allowed to subscribe*.
 
 Efunguz is mutable. You can
 
@@ -294,7 +294,7 @@ Efunguz is mutable. You can
 let that_publickey: &str = "WR)%3-d9dw)%3VQ@O37dVe<09FuNzI{vh}Vfi+]0";
 let that_onion: &str = "abcde23456abcde23456abcde23456abcde23456abcde23456abcdef";
 let that_port: u16 = 12345;
-if let Ok(ehypha) = efunguz.add_ehypha(that_publickey, that_onion, that_port).unwrap() {
+if let Ok(ehypha) = efunguz.add_ehypha(that_publickey, that_onion, that_port) {
     ...
 };
 ```
@@ -336,7 +336,7 @@ while !quit { // main program loop
         efunguz.emit_etale("status2", &status_parts);
     }
     if that_etale.t_in > t_last_etale {
-        if (that_etale.parts.size() == 2) && (that_etale.parts[1].len() == 4) { // sanity checks
+        if (that_etale.parts.len() == 2) && (that_etale.parts[1].len() == 4) { // sanity checks
             let mut buf: [0u8; 4];
             buf.copy_from_slice(& that_etale.parts[1]);
             let kappa_level = i32::from_le_bytes(buf);
