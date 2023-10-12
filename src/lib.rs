@@ -118,8 +118,8 @@ extern "C" {
     fn free(p: *mut c_void);
 }
 
-pub const LIB_VERSION: &str = "0.9.2";
-pub const LIB_DATE: &str = "2023.10.11";
+pub const LIB_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const LIB_DATE: &str = "2023.10.12";
 
 pub const DEF_PUBSUB_PORT: u16 = 0xEDAF; // 60847
 
