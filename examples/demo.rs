@@ -419,7 +419,7 @@ impl Realm_CA {
             let t = 1e-6 * ((time_musec() - t_start) as f64);
 
             if (t - t_last_render) * (self.framerate as f64) > 1.0 {
-                // let _ = stdout().queue(Clear(ClearType::All)); // too much blinking...
+                // let _ = stdout().queue(Clear(ClearType::All)); // flickering...
 
                 if render {
                     self.render(paused);
@@ -481,6 +481,7 @@ impl Realm_CA {
                                 self.reset();
                             },
                             'v' | 'V' => {
+                                let _ = queue!(stdout(), Clear(ClearType::All));
                                 render = !render;
                             },
                             'p' | 'P' => {

@@ -30,13 +30,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
- /*
- * Source
+/*
+ * Library
  */
 
-extern crate rand;
-
-use rand::prelude::*;
+extern crate getrandom;
+// use rand::prelude::*;
 
 #[allow(unused_imports)]
 use std::{
@@ -67,27 +66,27 @@ use std::{
 const ZMQ_PUB: c_int = 1;
 const ZMQ_REP: c_int = 4;
 const ZMQ_SUB: c_int = 2;
-
 // Socket options
+const ZMQ_BLOCKY: c_int = 70;
 const ZMQ_CURVE_PUBLICKEY: c_int = 48;
 const ZMQ_CURVE_SECRETKEY: c_int = 49;
 const ZMQ_CURVE_SERVER: c_int = 47;
 const ZMQ_CURVE_SERVERKEY: c_int = 50;
 const ZMQ_IPV6: c_int = 42;
-const ZMQ_LINGER: c_int = 17;
 const ZMQ_ROUTING_ID: c_int = 5;
 const ZMQ_SOCKS_PROXY: c_int = 68;
 const ZMQ_SUBSCRIBE: c_int = 6;
 const ZMQ_UNSUBSCRIBE: c_int = 7;
 const ZMQ_ZAP_DOMAIN: c_int = 55;
-
 // Message options
 const ZMQ_MORE: c_int = 1;
-
 // Send/recv options
 const ZMQ_SNDMORE: c_int = 2;
-
+// Poll events
 const ZMQ_POLLIN: c_short = 1;
+
+// Copied from errno-base.h
+const C_EINTR: c_int = 4;
 
 #[link(name = "zmq")]
 extern "C" {
@@ -98,12 +97,13 @@ extern "C" {
     fn zmq_ctx_set(context: *mut c_void, option_name: c_int, option_value: c_int) -> c_int;
     fn zmq_ctx_shutdown(context: *mut c_void) -> c_int;
     fn zmq_ctx_term(context: *mut c_void) -> c_int;
-    fn zmq_curve_public(z85_public_key: *mut c_uchar, z85_secret_key: *mut c_uchar);
+    fn zmq_curve_public(z85_public_key: *mut c_uchar, z85_secret_key: *mut c_uchar) -> c_int;
+    fn zmq_errno() -> c_int;
     fn zmq_msg_close(msg: *mut zmq_msg_t) -> c_int;
     fn zmq_msg_data(msg: *mut zmq_msg_t) -> *mut c_void;
     fn zmq_msg_get(message: *mut zmq_msg_t, property: c_int) -> c_int;
     fn zmq_msg_init(msg: *mut zmq_msg_t) -> c_int;
-    fn zmq_msg_init_data(msg: *mut zmq_msg_t, data: *mut c_void, size: usize, ffn: extern "C" fn(*mut c_void, *mut c_void), hint: *mut c_void);
+    fn zmq_msg_init_size(msg: *mut zmq_msg_t, size: usize) -> c_int;
     fn zmq_msg_recv(msg: *mut zmq_msg_t, socket: *mut c_void, flags: c_int) -> c_int;
     fn zmq_msg_send(msg: *mut zmq_msg_t, socket: *mut c_void, flags: c_int) -> c_int;
     fn zmq_msg_size(msg: *mut zmq_msg_t) -> usize;
@@ -113,13 +113,8 @@ extern "C" {
     fn zmq_z85_encode(dest: *mut c_uchar, data: *const u8, size: usize) -> *mut c_char;
 }
 
-extern "C" {
-    fn malloc(size: usize) -> *mut c_void;
-    fn free(p: *mut c_void);
-}
-
 pub const LIB_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LIB_DATE: &str = "2023.10.12";
+pub const LIB_DATE: &str = "2023.10.31";
 
 pub const DEF_PUBSUB_PORT: u16 = 0xEDAF; // 60847
 
@@ -127,11 +122,10 @@ pub const DEF_TOR_PROXY_PORT: u16 = 9050; // default from /etc/tor/torrc
 pub const DEF_TOR_PROXY_HOST: &str = "127.0.0.1"; // default from /etc/tor/torrc
 
 const KEY_Z85_LEN: usize = 40;
-const KEY_Z85_CSTR_LEN: usize = 41;
+const KEY_Z85_CSTR_LEN: usize = KEY_Z85_LEN + 1;
 const KEY_BIN_LEN: usize = 32;
 
 const DEF_IPV6_STATUS: c_int = 1;
-const DEF_LINGER: c_int = 1;
 
 const CURVE_MECHANISM_ID: &str = "CURVE"; // See https://rfc.zeromq.org/spec/27/
 const ZAP_DOMAIN: &str = "emyz";
@@ -174,7 +168,6 @@ pub struct Etale {
 
 pub struct Ehypha {
     subsock: *mut c_void,
-    subpollitem: zmq_pollitem_t,
     etales: HashMap<String, Etale>
 }
 
@@ -187,15 +180,8 @@ pub struct Efunguz {
     ehyphae: HashMap<String, Ehypha>,
     context: *mut c_void,
     zapsock: *mut c_void,
-    zappollitem: zmq_pollitem_t,
     zap_session_id: Vec<u8>,
     pubsock: *mut c_void
-}
-
-extern "C" fn zmq_free_fn(data: *mut c_void, _hint: *mut c_void) {
-    unsafe {
-        free(data);
-    }
 }
 
 fn time_musec() -> i64 {
@@ -248,16 +234,19 @@ fn zmqe_connect(socket: *mut c_void, endpoint: &str) -> c_int {
     }
 }
 
-fn zmqe_curve_public(z85_secret_key: &str) -> String {
+fn zmqe_curve_public(z85_secret_key: &str) -> (String, c_int) {
     let mut sec_bufn = [0u8; KEY_Z85_CSTR_LEN];
     unsafe { // "safe" if z85_secret_key is not shorter than KEY_Z85_LEN... see cut_pad_key_str()
         (z85_secret_key.as_ptr() as *const u8).copy_to(sec_bufn.as_mut_ptr(), KEY_Z85_LEN);
     }
     let mut pub_bufn = [0u8; KEY_Z85_CSTR_LEN];
-    unsafe {
-        zmq_curve_public(pub_bufn.as_mut_ptr(), sec_bufn.as_mut_ptr());
-    }
-    String::from_utf8(pub_bufn[..KEY_Z85_LEN].to_vec()).unwrap_or_default()
+    let r = unsafe {
+        zmq_curve_public(pub_bufn.as_mut_ptr(), sec_bufn.as_mut_ptr())
+    };
+    match r {
+        0 => (String::from_utf8(pub_bufn[..KEY_Z85_LEN].to_vec()).unwrap_or_default(), 0),
+        _ => (String::new(), r)
+    }    
 }
 
 impl zmq_msg_t {
@@ -284,9 +273,9 @@ fn zmqe_send(socket: *mut c_void, parts: & Vec<Vec<u8>>) {
     for i in 0..parts.len() {
         unsafe {
             let size = parts[i].len();
-            let data = malloc(size);
+            zmq_msg_init_size((&mut msg) as *mut zmq_msg_t, size);
+            let data = zmq_msg_data((&mut msg) as *mut zmq_msg_t);
             (parts[i].as_ptr() as *const c_void).copy_to(data, size);
-            zmq_msg_init_data((&mut msg) as *mut zmq_msg_t, data, size, zmq_free_fn, ptr::null_mut());
             if zmq_msg_send((&mut msg) as *mut zmq_msg_t, socket, if (i + 1) < parts.len() {ZMQ_SNDMORE} else {0}) < 0 {
                 zmq_msg_close((&mut msg) as *mut zmq_msg_t);
             }
@@ -317,9 +306,10 @@ fn zmqe_recv(socket: *mut c_void) -> Vec<Vec<u8>> {
     parts
 }
 
-fn zmqe_poll_in_now(zpi: &mut zmq_pollitem_t) -> c_int {
+fn zmqe_poll_in_now(socket: *mut c_void) -> c_int {
+    let mut zpi = zmq_pollitem_t::new_pollin(socket);
     unsafe {
-        zmq_poll(zpi as *mut zmq_pollitem_t, 1, 0)
+        zmq_poll(&mut zpi, 1, 0)
     }
 }
 
@@ -354,25 +344,27 @@ impl Ehypha {
         let subsock = unsafe {
             zmq_socket(context, ZMQ_SUB)
         };
-        zmqe_setsockopt_int(subsock, ZMQ_LINGER, DEF_LINGER);
         zmqe_setsockopt_str(subsock, ZMQ_CURVE_SECRETKEY, secretkey);
         zmqe_setsockopt_str(subsock, ZMQ_CURVE_PUBLICKEY, publickey);
         zmqe_setsockopt_str(subsock, ZMQ_CURVE_SERVERKEY, serverkey);
         zmqe_setsockopt_str(subsock, ZMQ_SOCKS_PROXY, & format!("{}:{}", torproxy_host, torproxy_port));
-        zmqe_connect(subsock, & format!("tcp://{}.onion:{}", onion, port));
-        let subpollitem = zmq_pollitem_t::new_pollin(subsock);
+        let endpoint = format!("tcp://{}.onion:{}", onion, port);
+        zmqe_connect(subsock, &endpoint);
         Self {
             subsock,
-            subpollitem,
             etales: HashMap::new()
         }
     }
 
-    pub fn add_etale(&mut self, title: &str) -> Result<(), String> {
+    pub fn add_etale(&mut self, title: &str) -> Result<&Etale, String> {
         match self.etales.insert(String::from(title), Etale::new_default()) {
             None => {
                 zmqe_setsockopt_str(self.subsock, ZMQ_SUBSCRIBE, title);
-                Ok(())
+                match self.etales.get(title) {
+                    Some(et) => Ok(et),
+                    None => Err(String::from(ERR_ABSENT))
+                }
+                
             },
             Some(_) => Err(String::from(ERR_ALREADY_PRESENT))
         }
@@ -446,7 +438,7 @@ impl Ehypha {
 
     fn update(&mut self) {
         let t = time_musec();
-        while zmqe_poll_in_now(&mut self.subpollitem) > 0 {
+        while zmqe_poll_in_now(self.subsock) > 0 {
             let msg_parts = zmqe_recv(self.subsock);
             // Sanity checks...
             if msg_parts.len() >= 2 {
@@ -457,7 +449,7 @@ impl Ehypha {
                     let title = String::from_utf8(topic[..(l - 1)].to_vec()).unwrap_or_default();
                     if let Some(etale) = self.etales.get_mut(&title) {
                         if ! etale.paused {
-                            if msg_parts[1].len() == 8 {
+                            if msg_parts[1].len() == 8 { // i64
                                 etale.parts.clear();
                                 etale.parts.extend_from_slice(& msg_parts[2..]);
                                 let mut buf = [0u8; 8];
@@ -486,7 +478,7 @@ impl Efunguz {
 
     pub fn new(secretkey: &str, whitelist_publickeys: & HashSet<String>, pub_port: u16, torproxy_port: u16, torproxy_host: &str) -> Self {
         let secretkey = cut_pad_key_str(secretkey);
-        let publickey = zmqe_curve_public(&secretkey);
+        let (publickey, _) = zmqe_curve_public(&secretkey);
 
         let mut cp_whitelist_publickeys = HashSet::new();
         for k in whitelist_publickeys {
@@ -503,6 +495,7 @@ impl Efunguz {
 
         unsafe {
             zmq_ctx_set(context, ZMQ_IPV6, DEF_IPV6_STATUS);
+            zmq_ctx_set(context, ZMQ_BLOCKY, 0);
         }
 
         // At first, REP socket for ZAP auth...
@@ -510,20 +503,19 @@ impl Efunguz {
             zmq_socket(context, ZMQ_REP)
         };
 
-        zmqe_setsockopt_int(zapsock, ZMQ_LINGER, DEF_LINGER);
         zmqe_bind(zapsock, "inproc://zeromq.zap.01");
 
-        let zappollitem = zmq_pollitem_t::new_pollin(zapsock);
-
         let mut zap_session_id = vec![0u8; ZAP_SESSION_ID_LEN];
-        thread_rng().fill_bytes(&mut zap_session_id); // must be cryptographically random... is it?
+         // Must be cryptographically random...
+        getrandom::getrandom(&mut zap_session_id).unwrap_or(());
+        // thread_rng().fill_bytes(&mut zap_session_id);
+        // ...is it?
 
         // ..and only then, PUB socket
         let pubsock = unsafe {
             zmq_socket(context, ZMQ_PUB)
         };
 
-        zmqe_setsockopt_int(pubsock, ZMQ_LINGER, DEF_LINGER);
         zmqe_setsockopt_int(pubsock, ZMQ_CURVE_SERVER, 1);
         zmqe_setsockopt_str(pubsock, ZMQ_CURVE_SECRETKEY, &secretkey);
         zmqe_setsockopt_vec(pubsock, ZMQ_ZAP_DOMAIN, & ZAP_DOMAIN.as_bytes().to_vec()); // to enable auth, must be non-empty due to ZMQ RFC 27
@@ -539,7 +531,6 @@ impl Efunguz {
             ehyphae,
             context,
             zapsock,
-            zappollitem,
             zap_session_id,
             pubsock
         }
@@ -619,7 +610,7 @@ impl Efunguz {
     }
 
     pub fn update(&mut self) {
-        while zmqe_poll_in_now(&mut self.zappollitem) > 0 {
+        while zmqe_poll_in_now(self.zapsock) > 0 {
             let request = zmqe_recv(self.zapsock);
             let mut reply: Vec<Vec<u8>> = Vec::new();
 
@@ -629,23 +620,24 @@ impl Efunguz {
             // let address = request[3].clone();
             let identity = request[4].clone();
             let mechanism = request[5].clone();
-            let mut key_u8 = request[6].clone();
+            let mut key_bin = request[6].clone();
 
-            key_u8.truncate(KEY_BIN_LEN);
+            key_bin.truncate(KEY_BIN_LEN);
             let mut key_bufn = [0u8; KEY_Z85_CSTR_LEN];
             unsafe {
-                zmq_z85_encode(key_bufn.as_mut_ptr(), key_u8.as_ptr(), KEY_BIN_LEN);
+                zmq_z85_encode(key_bufn.as_mut_ptr(), key_bin.as_ptr(), KEY_BIN_LEN);
             }
-            let key = String::from_utf8(key_bufn[..KEY_Z85_LEN].to_vec()).unwrap_or_default();
+            let key_z85 = String::from_utf8(key_bufn[..KEY_Z85_LEN].to_vec()).unwrap_or_default();
 
             reply.push(version);
             reply.push(sequence);
 
-            if (identity == self.zap_session_id) && (mechanism == CURVE_MECHANISM_ID.as_bytes().to_vec()) && (self.whitelist_publickeys.is_empty() || self.whitelist_publickeys.contains(&key)) {
-                // Auth passed; though needless (yet), set user-id to client's publickey
+            if (identity == self.zap_session_id) && (mechanism == CURVE_MECHANISM_ID.as_bytes().to_vec()) && (self.whitelist_publickeys.is_empty() || self.whitelist_publickeys.contains(&key_z85)) {
+                // Auth passed
+                // Though needless (yet), set user-id to client's public key
                 reply.push("200".as_bytes().to_vec());
                 reply.push("OK".as_bytes().to_vec());
-                reply.push(key.as_bytes().to_vec());
+                reply.push(key_z85.as_bytes().to_vec());
                 reply.push("".as_bytes().to_vec());
             } else {
                 // Auth failed
@@ -667,14 +659,20 @@ impl Efunguz {
 
 impl Drop for Efunguz {
     fn drop(&mut self) {
-        self.ehyphae.clear(); // to close subsock of each ehypha in its destructor before terminating context, to which those sockets belong
+        self.ehyphae.clear(); // to close subsock of each ehypha in its dropper before terminating context, to which those sockets belong
 
         unsafe {
             zmq_close(self.pubsock);
             zmq_close(self.zapsock);
 
             zmq_ctx_shutdown(self.context);
-            zmq_ctx_term(self.context);
+            while zmq_ctx_term(self.context) == -1 {
+                if zmq_errno() == C_EINTR {
+                    continue;
+                } else {
+                    break;
+                }
+            }
         }
     }
 }

@@ -9,19 +9,23 @@ extern "C" {
 }
 
 const KEY_Z85_LEN: usize = 40;
+const KEY_Z85_CSTR_LEN: usize = KEY_Z85_LEN + 1;
 
-fn main() {
-    let mut publickey_bufn = vec![0u8; KEY_Z85_LEN + 1];
-    let mut secretkey_bufn = vec![0u8; KEY_Z85_LEN + 1];
-    unsafe {
+fn zmqe_curve_keypair() -> (String, String, i32) {
+    let mut publickey_bufn = vec![0u8; KEY_Z85_CSTR_LEN];
+    let mut secretkey_bufn = vec![0u8; KEY_Z85_CSTR_LEN];
+    let r = unsafe {
         zmq_curve_keypair(
             (&mut publickey_bufn).as_mut_ptr() as *mut c_char,
             (&mut secretkey_bufn).as_mut_ptr() as *mut c_char
-        );
-    }
-    let publickey = String::from_utf8(publickey_bufn[..KEY_Z85_LEN].to_vec()).unwrap();
+        )
+    } as i32;
+    (String::from_utf8(publickey_bufn[..KEY_Z85_LEN].to_vec()).unwrap(), String::from_utf8(secretkey_bufn[..KEY_Z85_LEN].to_vec()).unwrap(), r)
+}
+
+fn main() {
+    let (publickey, secretkey, _) = zmqe_curve_keypair();
     println!("Public key: {}", &publickey);
-    let secretkey = String::from_utf8(secretkey_bufn[..KEY_Z85_LEN].to_vec()).unwrap();
     // Make sure no one is behind your back...
     println!("Secret key: {}", &secretkey);
 }

@@ -2,11 +2,13 @@
 
 is another wrapper around [ZeroMQ](https://zeromq.org/)'s [Publish-Subscribe](https://zeromq.org/socket-api/#publish-subscribe-pattern) messaging pattern with mandatory [Curve](https://rfc.zeromq.org/spec/26/) security and optional [ZAP](https://rfc.zeromq.org/spec/27/) authentication filter, over [Tor](https://torproject.org), through Tor SOCKS proxy, for distributed artificial elife, decision making etc. systems where each peer, identified by its public key, onion address, and port, publishes and updates vectors of vectors of bytes of data under unique topics that other peers subscribe to and receive the respective data.
 
-Requires [Rust toolchain](https://www.rust-lang.org/tools/install), [libzmq](https://github.com/zeromq/libzmq) ([more on build](http://wiki.zeromq.org/build:_start), but shared library from e.g. `libzmq5` in Linux may suffice), and [Tor](https://community.torproject.org/onion-services/setup/install/).
+Requires [Rust](https://www.rust-lang.org/tools/install), [libzmq](https://github.com/zeromq/libzmq) ([more on build](http://wiki.zeromq.org/build:_start), but e.g. [`libzmq3-dev` and `libzmq5` packages](https://github.com/zeromq/libzmq#linux) in Linux suffice), and [Tor](https://community.torproject.org/onion-services/setup/install/).
 
 Versions in other languages:
 
 * [C++](https://github.com/emyzelium/emyzelium-cpp)
+
+* [Go](https://github.com/emyzelium/emyzelium-go)
 
 * [Python](https://github.com/emyzelium/emyzelium-py)
 
@@ -20,7 +22,7 @@ See also [mycoses](https://en.wikipedia.org/wiki/Fungal_infection).
 
 Let's use Emyzelium to introduce distributiveness into cellular automata, classical [Conway's Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) and its variations. [Once...](https://github.com/XC-Li/Parallel_CellularAutomaton_Wildfire) [more...](http://www.shodor.org/media/content/petascale/materials/UPModules/GameOfLife/Life_Module_Document_pdf.pdf) [once...](https://books.google.com.ua/books?id=QN18DwAAQBAJ&pg=PA403&lpg=PA403) [again...](https://www.semanticscholar.org/paper/A-Distributed-Cellular-Automata-Simulation-on-of-Topa/164c577848b943e460aff91255f348256471faa0)
 
-For the sake of definiteness, Linux with installed Rust toolchain and `libzmq5` package is assumed. But the demo should run under other OSes as well.
+For the sake of definiteness, Linux with installed Rust and `libzmq5` package is assumed. But the demo should run under other OSes as well.
 
 ### On single PC, connected to Internet
 
@@ -51,7 +53,7 @@ then check if there are any problems:
 $ systemctl status tor@default
 ```
 
-should show `... active(running) ...`
+should show `... active(running) ...` and `... Bootstrapped 100% (done): Done ...`
 
 Wait a little for 3 specified dirs to appear, and, in each of them, the file `hostname`.
 
@@ -150,7 +152,7 @@ HiddenServicePort 60847
 
 only onion addresses in `hostname` files will be different and, as before, should be specified as `ALIEN_ONION`, `JOHN_ONION`, `MARY_ONION` values in `demo.rs`-s; all `_PORT`-s must be `60847`. Also, this time it suffices on each PC to have in `demo.rs` only the single corresponding `_SECRETKEY`.
 
-After Emyzelium files with accordingly modified `demo.rs` have been put on these PCs and built has been successful, do the following:
+After Emyzelium files with accordingly modified `demo.rs` have been put on these PCs and `demo` executable has been successfully built, do the following:
 
 ```shell
 pc1$ cargo run --release --example demo Alien
@@ -186,19 +188,23 @@ extern "C" {
 }
 
 const KEY_Z85_LEN: usize = 40;
+const KEY_Z85_CSTR_LEN: usize = KEY_Z85_LEN + 1;
 
-fn main() {
-    let mut publickey_bufn = vec![0u8; KEY_Z85_LEN + 1];
-    let mut secretkey_bufn = vec![0u8; KEY_Z85_LEN + 1];
-    unsafe {
+fn zmqe_curve_keypair() -> (String, String, i32) {
+    let mut publickey_bufn = vec![0u8; KEY_Z85_CSTR_LEN];
+    let mut secretkey_bufn = vec![0u8; KEY_Z85_CSTR_LEN];
+    let r = unsafe {
         zmq_curve_keypair(
             (&mut publickey_bufn).as_mut_ptr() as *mut c_char,
             (&mut secretkey_bufn).as_mut_ptr() as *mut c_char
-        );
-    }
-    let publickey = String::from_utf8(publickey_bufn[..KEY_Z85_LEN].to_vec()).unwrap();
+        )
+    } as i32;
+    (String::from_utf8(publickey_bufn[..KEY_Z85_LEN].to_vec()).unwrap(), String::from_utf8(secretkey_bufn[..KEY_Z85_LEN].to_vec()).unwrap(), r)
+}
+
+fn main() {
+    let (publickey, secretkey, _) = zmqe_curve_keypair();
     println!("Public key: {}", &publickey);
-    let secretkey = String::from_utf8(secretkey_bufn[..KEY_Z85_LEN].to_vec()).unwrap();
     // Make sure no one is behind your back...
     println!("Secret key: {}", &secretkey);
 }
@@ -264,7 +270,7 @@ So, *Efunguz*, *Ehypha*, and *Etale* are just fancy names of well known concepts
 
 ---
 
-**Efunguz**, a.k.a. peer, is the mediator between some "realm", represented by your program, and Tor network, represented by ZeroMQ on top of Tor SOCKS proxy, to which it talks. To the former, it simplifies security, (re)connection, and data flow tasks.
+**Efunguz**, a.k.a. peer, is the mediator between some "realm", represented by your Rust program, and Tor network, represented by ZeroMQ on top of Tor SOCKS proxy, to which it talks. To the former, it simplifies security, (re)connection, and data flow tasks.
 
 The simplest way to construct efunguz is
 
@@ -296,10 +302,10 @@ let that_onion: &str = "abcde23456abcde23456abcde23456abcde23456abcde23456abcdef
 let that_port: u16 = 12345;
 if let Ok(ehypha) = efunguz.add_ehypha(that_publickey, that_onion, that_port) {
     ...
-};
+}
 ```
 
-* obtain immutable and mutable references to ehypha by its publickey via `get_ehypha()` and `get_mut_ehypha()`:
+* obtain immutable and mutable references to ehypha by its public key via `get_ehypha()` and `get_mut_ehypha()`:
 
 ```rust
 let that_publickey: &str = "iGxlt)JYh!P9xPCY%BlY4Y]c^<=W)k^$T7GirF[R";
@@ -335,7 +341,7 @@ while !quit { // main program loop
     if my_status_updated {
         efunguz.emit_etale("status2", &status_parts);
     }
-    if that_etale.t_in > t_last_etale {
+    if that_etale.t_in() > t_last_etale {
         if (that_etale.parts.len() == 2) && (that_etale.parts[1].len() == 4) { // sanity checks
             let mut buf: [0u8; 4];
             buf.copy_from_slice(& that_etale.parts[1]);
@@ -360,7 +366,7 @@ Ehypha is mutable. You can
 * subscribe and unsubscribe to etales from target efunguz via `add_etale()` and `del_etale()`:
 
 ```rust
-if Ok(that_etale) = ehypha.add_etale("status3") {
+if let Ok(that_etale) = ehypha.add_etale("status3") {
     ...
 }
 ```
@@ -373,7 +379,7 @@ At first, etale is empty (no parts). If efunguz with public key `WR)%3-d9dw)%3VQ
 let title: &str = "status7";
 if let Some(etale) = ehypha.get_etale(title) {
     ...
-};
+}
 ```
 
 * pause and resume update of either single etale, or all etales, via `pause_etale[s]()` and `resume_etale[s]()`
@@ -415,11 +421,11 @@ Here it is bidirectional, but may be unidirectional as well. For this to work, e
 
 **Q.** How reliable Emyzelium is? How secure? Are there backdoors?
 
-**A.** No "audit" has been performed, so... read the source through carefully, it is small enough — Rust version is smaller than this README. The buck then goes to underlying layers — ZeroMQ, Curve, Tor, TCP/IP etc. Sorry, there is no other way if you trust only yourself of today.
+**A.** No "audit" has been performed, so... read the source through carefully, it is small enough — Rust version is smaller than this README. The buck then goes to underlying layers — ZeroMQ, Curve, Tor, TCP/IP, BIOS/EFI, hardware etc. Sorry, there is no other way if you trust only yourself of current Planck time unit.
 
 Yes, there are backdoors. No, there are no backdoors.
 
-Do not omit sanity checks of received etales and during their deserialization.
+Do not omit sanity checks of received etales and during their deserialisation.
 
 Do not use keys from demo, generate your own unique pairs.
 
