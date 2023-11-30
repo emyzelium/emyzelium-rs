@@ -72,6 +72,7 @@ const ZMQ_CURVE_PUBLICKEY: c_int = 48;
 const ZMQ_CURVE_SECRETKEY: c_int = 49;
 const ZMQ_CURVE_SERVER: c_int = 47;
 const ZMQ_CURVE_SERVERKEY: c_int = 50;
+const ZMQ_EVENTS: c_int = 15;
 const ZMQ_IPV6: c_int = 42;
 const ZMQ_ROUTING_ID: c_int = 5;
 const ZMQ_SOCKS_PROXY: c_int = 68;
@@ -83,7 +84,7 @@ const ZMQ_MORE: c_int = 1;
 // Send/recv options
 const ZMQ_SNDMORE: c_int = 2;
 // Poll events
-const ZMQ_POLLIN: c_short = 1;
+const ZMQ_POLLIN: c_int = 1;
 
 // Copied from errno-base.h
 const C_EINTR: c_int = 4;
@@ -99,6 +100,7 @@ extern "C" {
     fn zmq_ctx_term(context: *mut c_void) -> c_int;
     fn zmq_curve_public(z85_public_key: *mut c_uchar, z85_secret_key: *mut c_uchar) -> c_int;
     fn zmq_errno() -> c_int;
+    fn zmq_getsockopt(socket: *mut c_void, option_name: c_int, option_value: *mut c_void, option_len: *mut usize) -> c_int;
     fn zmq_msg_close(msg: *mut zmq_msg_t) -> c_int;
     fn zmq_msg_data(msg: *mut zmq_msg_t) -> *mut c_void;
     fn zmq_msg_get(message: *mut zmq_msg_t, property: c_int) -> c_int;
@@ -107,14 +109,13 @@ extern "C" {
     fn zmq_msg_recv(msg: *mut zmq_msg_t, socket: *mut c_void, flags: c_int) -> c_int;
     fn zmq_msg_send(msg: *mut zmq_msg_t, socket: *mut c_void, flags: c_int) -> c_int;
     fn zmq_msg_size(msg: *mut zmq_msg_t) -> usize;
-    fn zmq_poll(items: *mut zmq_pollitem_t, nitems: c_int, timeout: c_long) -> c_int;
     fn zmq_setsockopt(socket: *mut c_void, option_name: c_int, option_value: *const c_void, option_len: usize) -> c_int;
     fn zmq_socket(context: *mut c_void, stype: c_int) -> *mut c_void;
     fn zmq_z85_encode(dest: *mut c_uchar, data: *const u8, size: usize) -> *mut c_char;
 }
 
 pub const LIB_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LIB_DATE: &str = "2023.10.31";
+pub const LIB_DATE: &str = "2023.11.30";
 
 pub const DEF_PUBSUB_PORT: u16 = 0xEDAF; // 60847
 
@@ -142,21 +143,6 @@ const ERR_ABSENT: &str = "absent";
 #[allow(non_camel_case_types)]
 struct zmq_msg_t { // from zmq.h
     _d: [c_uchar; 64]
-}
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-struct zmq_pollitem_t { // from zmq.h
-    socket: *mut c_void,
-
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    fd: c_longlong,
-
-    #[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
-    fd: c_int,
-
-    events: c_short,
-    revents: c_short
 }
 
 pub struct Etale {
@@ -220,6 +206,15 @@ fn zmqe_setsockopt_vec(socket: *mut c_void, option_name: c_int, option_value: &V
     }
 }
 
+fn zmqe_getsockopt_events(socket: *mut c_void) -> c_int {
+    let mut option_value: c_int = 0;
+    let mut option_len: usize = std::mem::size_of::<c_int>();
+    unsafe {
+        zmq_getsockopt(socket, ZMQ_EVENTS, (&mut option_value) as *mut c_int as *mut c_void, (&mut option_len) as *mut usize);
+    }
+    option_value
+}
+
 fn zmqe_bind(socket: *mut c_void, endpoint: &str) -> c_int {
     let cstr = CString::new(endpoint).unwrap_or_default();
     unsafe {
@@ -253,17 +248,6 @@ impl zmq_msg_t {
     fn new_default() -> Self {
         Self {
             _d: [0 as c_uchar; 64]
-        }
-    }
-}
-
-impl zmq_pollitem_t {
-    fn new_pollin(socket: *mut c_void) -> Self {
-        Self {
-            socket,
-            fd: 0,
-            events: ZMQ_POLLIN,
-            revents: 0
         }
     }
 }
@@ -304,13 +288,6 @@ fn zmqe_recv(socket: *mut c_void) -> Vec<Vec<u8>> {
         }
     }
     parts
-}
-
-fn zmqe_poll_in_now(socket: *mut c_void) -> c_int {
-    let mut zpi = zmq_pollitem_t::new_pollin(socket);
-    unsafe {
-        zmq_poll(&mut zpi, 1, 0)
-    }
 }
 
 impl Etale {
@@ -438,7 +415,7 @@ impl Ehypha {
 
     fn update(&mut self) {
         let t = time_musec();
-        while zmqe_poll_in_now(self.subsock) > 0 {
+        while zmqe_getsockopt_events(self.subsock) & ZMQ_POLLIN != 0 {
             let msg_parts = zmqe_recv(self.subsock);
             // Sanity checks...
             if msg_parts.len() >= 2 {
@@ -576,7 +553,7 @@ impl Efunguz {
         }
     }
 
-    pub fn get_ehypha(&mut self, publickey: &str) -> Option<&Ehypha> {
+    pub fn get_ehypha(&self, publickey: &str) -> Option<&Ehypha> {
         let cp_publickey = cut_pad_key_str(publickey);
         self.ehyphae.get(&cp_publickey)
     }
@@ -610,7 +587,7 @@ impl Efunguz {
     }
 
     pub fn update(&mut self) {
-        while zmqe_poll_in_now(self.zapsock) > 0 {
+        while zmqe_getsockopt_events(self.zapsock) & ZMQ_POLLIN != 0 {
             let request = zmqe_recv(self.zapsock);
             let mut reply: Vec<Vec<u8>> = Vec::new();
 

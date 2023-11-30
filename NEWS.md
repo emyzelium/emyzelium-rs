@@ -1,3 +1,11 @@
+Version 0.9.6 (2023.11.30)
+--------------------------
+
+* Removed useless `mut` in `get_ehypha(&mut self, …)`, it is needed only in `get_mut_ehypha(…)`
+
+* Replaced `zmq_poll(socket, …)` by `zmq_getsockopt(socket, ZMQ_EVENTS, …)`
+
+
 Version 0.9.4 (2023.10.31)
 --------------------------
 
