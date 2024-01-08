@@ -1,6 +1,6 @@
 [package]
 name = "emyzelium"
-version = "0.9.6"
+version = "0.9.8"
 authors = ["emyzelium <emyzelium@protonmail.com>", "serhon <serhon@protonmail.com>"]
 description = "Wrapper for ZeroMQ's Pub-Sub with Curve+ZAP, over Tor. Peers, identified by public key, onion, and port, publish Vec<Vec<u8>> under topics to which other peers subscribe."
 homepage = "https://github.com/emyzelium/emyzelium-rs"
@@ -15,8 +15,8 @@ edition = "2021"
 incremental = true
 
 [dependencies]
-getrandom = "0.2"
+getrandom = "0.2.11"
 
 [dev-dependencies]
-crossterm = "0.26"
-rand = "0.8"
+crossterm = "0.27.0"
+rand = "0.8.5"

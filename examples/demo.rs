@@ -14,7 +14,7 @@
  * 
  * emyzelium@protonmail.com
  * 
- * Copyright (c) 2023 Emyzelium caretakers
+ * Copyright (c) 2023-2024 Emyzelium caretakers
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -426,7 +426,7 @@ impl Realm_CA {
                 } else {
                     print_str_def(0, 0, "Render OFF");
                 }
-                print_str_def((h >> 1) + 2, 0, & format!("This realm: \"{}'s\" (birth: {:?}, survival: {:?}), SLE {:.1}, autoemit ({:.1}) {}", & self.name, & self.birth, & self.survival, t - t_last_emit, self.autoemit_interval, if autoemit {"ON"} else {"OFF"}));
+                print_str_def((h >> 1) + 2, 0, & format!("This realm: \"{}'s\" (birth: {:?}, survival: {:?}), SLE {:.1}, autoemit ({:.1}) {}, InConnsN {}", & self.name, & self.birth, & self.survival, t - t_last_emit, self.autoemit_interval, if autoemit {"ON"} else {"OFF"}, self.efunguz.in_connections_num()));
                 clear_row_right();
                 let mut others_str = String::new();
 				for i in 0..self.others.len() {

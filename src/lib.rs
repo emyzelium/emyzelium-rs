@@ -14,7 +14,7 @@
  * 
  * emyzelium@protonmail.com
  * 
- * Copyright (c) 2023 Emyzelium caretakers
+ * Copyright (c) 2023-2024 Emyzelium caretakers
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,6 +63,7 @@ use std::{
 
 // Copied from zmq.h
 // Socket types
+const ZMQ_PAIR: c_int = 0;
 const ZMQ_PUB: c_int = 1;
 const ZMQ_REP: c_int = 4;
 const ZMQ_SUB: c_int = 2;
@@ -83,6 +84,10 @@ const ZMQ_ZAP_DOMAIN: c_int = 55;
 const ZMQ_MORE: c_int = 1;
 // Send/recv options
 const ZMQ_SNDMORE: c_int = 2;
+// Socket transport events
+const ZMQ_EVENT_ACCEPTED: c_int = 0x0020;
+const ZMQ_EVENT_DISCONNECTED: c_int = 0x0200;
+const ZMQ_EVENT_ALL: c_int = 0xFFFF;
 // Poll events
 const ZMQ_POLLIN: c_int = 1;
 
@@ -111,11 +116,12 @@ extern "C" {
     fn zmq_msg_size(msg: *mut zmq_msg_t) -> usize;
     fn zmq_setsockopt(socket: *mut c_void, option_name: c_int, option_value: *const c_void, option_len: usize) -> c_int;
     fn zmq_socket(context: *mut c_void, stype: c_int) -> *mut c_void;
+    fn zmq_socket_monitor(socket: *mut c_void, addr: *const c_char, events: c_int) -> c_int;
     fn zmq_z85_encode(dest: *mut c_uchar, data: *const u8, size: usize) -> *mut c_char;
 }
 
 pub const LIB_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LIB_DATE: &str = "2023.11.30";
+pub const LIB_DATE: &str = "2024.01.08";
 
 pub const DEF_PUBSUB_PORT: u16 = 0xEDAF; // 60847
 
@@ -167,7 +173,9 @@ pub struct Efunguz {
     context: *mut c_void,
     zapsock: *mut c_void,
     zap_session_id: Vec<u8>,
-    pubsock: *mut c_void
+    pubsock: *mut c_void,
+    monsock: *mut c_void,
+    in_conn_num: usize
 }
 
 fn time_musec() -> i64 {
@@ -226,6 +234,13 @@ fn zmqe_connect(socket: *mut c_void, endpoint: &str) -> c_int {
     let cstr = CString::new(endpoint).unwrap_or_default();
     unsafe {
         zmq_connect(socket, cstr.as_ptr())
+    }
+}
+
+fn zmqe_socket_monitor_all(socket: *mut c_void, addr: &str) -> c_int {
+    let cstr = CString::new(addr).unwrap_or_default();
+    unsafe {
+        zmq_socket_monitor(socket, cstr.as_ptr(), ZMQ_EVENT_ALL)
     }
 }
 
@@ -497,7 +512,17 @@ impl Efunguz {
         zmqe_setsockopt_str(pubsock, ZMQ_CURVE_SECRETKEY, &secretkey);
         zmqe_setsockopt_vec(pubsock, ZMQ_ZAP_DOMAIN, & ZAP_DOMAIN.as_bytes().to_vec()); // to enable auth, must be non-empty due to ZMQ RFC 27
         zmqe_setsockopt_vec(pubsock, ZMQ_ROUTING_ID, & zap_session_id); // to make sure only this pubsock can pass auth through zapsock; see update()
+        
+        // Before binding, attach monitor
+        zmqe_socket_monitor_all(pubsock, "inproc://monitor-pub");
+        let monsock = unsafe {
+            zmq_socket(context, ZMQ_PAIR)
+        };
+        zmqe_connect(monsock, "inproc://monitor-pub");
+
         zmqe_bind(pubsock, & format!("tcp://*:{}", pub_port));
+
+        let in_conns: usize = 0;
 
         Self {
             secretkey,
@@ -509,7 +534,9 @@ impl Efunguz {
             context,
             zapsock,
             zap_session_id,
-            pubsock
+            pubsock,
+            monsock,
+            in_conn_num: in_conns
         }
     }
 
@@ -630,6 +657,26 @@ impl Efunguz {
         for (_, eh) in &mut self.ehyphae {
             eh.update();
         }
+
+        while zmqe_getsockopt_events(self.monsock) & ZMQ_POLLIN != 0 {
+            let event_msg = zmqe_recv(self.monsock);
+            if event_msg.len() > 0 {
+                if event_msg[0].len() >= 2 {
+                    let event_num = u16::from_le_bytes([event_msg[0][0], event_msg[0][1]]);
+                    if ((event_num as c_int) & ZMQ_EVENT_ACCEPTED) != 0 {
+                        self.in_conn_num += 1;
+                    }
+                    if (((event_num as c_int) & ZMQ_EVENT_DISCONNECTED) != 0) && (self.in_conn_num > 0) {
+                        self.in_conn_num -= 1;
+                    } 
+                }
+            }
+
+        }
+    }
+
+    pub fn in_connections_num(&self) -> usize {
+        self.in_conn_num
     }
 
 }
@@ -639,6 +686,7 @@ impl Drop for Efunguz {
         self.ehyphae.clear(); // to close subsock of each ehypha in its dropper before terminating context, to which those sockets belong
 
         unsafe {
+            zmq_close(self.monsock);
             zmq_close(self.pubsock);
             zmq_close(self.zapsock);
 

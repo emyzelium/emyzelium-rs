@@ -174,7 +174,8 @@ Emyzelium relies on ZeroMQ's Curve and ZAP encryption and authentication schemes
 
 Emyzelium's methods expect the keys as `&str`-s in Z85 encoding.
 
-To obtain such pair of keys,
+<details>
+<summary><b>How to obtain such pair of keys</b></summary>
 
 ```rust
 use std::ffi::{
@@ -211,8 +212,14 @@ fn main() {
 ```
 
 Note Emyzelium is not used here; on the other hand, this very code is in `examples/genkeypair.rs`.
+</details>
 
-Obviously, *keys are not arbitrary ASCII strings of length 40* that could be "typed by smashing on keyboard". In particular, the public one can be derived from the secret one:
+---
+
+Obviously, *keys are not arbitrary ASCII strings of length 40* that could be "typed by smashing on keyboard". In particular,
+
+<details>
+<summary><b>How to derive the public one from the secret one</b></summary>
 
 ```rust
 ...
@@ -230,6 +237,9 @@ extern "C" {
     }
     println!("Public key: {}", String::from_utf8(publickey_bufn[..KEY_Z85_LEN].to_vec()).unwrap());
 ```
+</details>
+
+---
 
 You construct peers with unique secret keys, one for each. No one except you or those whom you trust should know these keys. Anyone who wants to communicate with your peers must know the corresponding public keys. Accordingly, you must know the public keys of peers run by others if you want to communicate with them, in addition to their onion and port. Using "whitelist" feature (see below) based on ZAP, the owner of a peer can restrict those who are able to communicate with this peer.
 
@@ -353,9 +363,11 @@ while !quit { // main program loop
 }
 ```
 
+* get the count of current accepted incoming connections from other efungi via `in_connections_num()`
+
 See also `Realm_CA::run()` in `demo.rs`.
 
-*Internally, Efunguz owns ZeroMQ context, PUB socket for etales, and REP socket for ZAP authentication.*
+*Internally, Efunguz owns ZeroMQ context, PUB socket for etales, REP socket for ZAP authentication, and PAIR socket monitoring PUB.*
 
 ---
 
