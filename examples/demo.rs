@@ -426,7 +426,7 @@ impl Realm_CA {
                 } else {
                     print_str_def(0, 0, "Render OFF");
                 }
-                print_str_def((h >> 1) + 2, 0, & format!("This realm: \"{}'s\" (birth: {:?}, survival: {:?}), SLE {:.1}, autoemit ({:.1}) {}, InConnsN {}", & self.name, & self.birth, & self.survival, t - t_last_emit, self.autoemit_interval, if autoemit {"ON"} else {"OFF"}, self.efunguz.in_connections_num()));
+                print_str_def((h >> 1) + 2, 0, & format!("This realm: \"{}'s\" (birth: {:?}, survival: {:?}), SLE {:.1}, autoemit ({:.1}) {}, InAbsorbing {}, InPermitted {}, InAttempted {}", & self.name, & self.birth, & self.survival, t - t_last_emit, self.autoemit_interval, if autoemit {"ON"} else {"OFF"}, self.efunguz.in_absorbing_num(), self.efunguz.in_permitted_num(), self.efunguz.in_attempted_num()));
                 clear_row_right();
                 let mut others_str = String::new();
 				for i in 0..self.others.len() {

@@ -87,6 +87,7 @@ const ZMQ_SNDMORE: c_int = 2;
 // Socket transport events
 const ZMQ_EVENT_ACCEPTED: c_int = 0x0020;
 const ZMQ_EVENT_DISCONNECTED: c_int = 0x0200;
+const ZMQ_EVENT_HANDSHAKE_SUCCEEDED: c_int = 0x1000;
 const ZMQ_EVENT_ALL: c_int = 0xFFFF;
 // Poll events
 const ZMQ_POLLIN: c_int = 1;
@@ -121,7 +122,7 @@ extern "C" {
 }
 
 pub const LIB_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LIB_DATE: &str = "2024.01.08";
+pub const LIB_DATE: &str = "2024.02.02";
 
 pub const DEF_PUBSUB_PORT: u16 = 0xEDAF; // 60847
 
@@ -175,7 +176,9 @@ pub struct Efunguz {
     zap_session_id: Vec<u8>,
     pubsock: *mut c_void,
     monsock: *mut c_void,
-    in_conn_num: usize
+    in_accepted_num: u64,
+    in_handshake_succeeded_num: u64,
+    in_disconnected_num: u64,
 }
 
 fn time_musec() -> i64 {
@@ -522,7 +525,9 @@ impl Efunguz {
 
         zmqe_bind(pubsock, & format!("tcp://*:{}", pub_port));
 
-        let in_conns: usize = 0;
+        let in_accepted_num: u64 = 0;
+        let in_handshake_succeeded_num: u64 = 0;
+        let in_disconnected_num: u64 = 0;
 
         Self {
             secretkey,
@@ -536,7 +541,9 @@ impl Efunguz {
             zap_session_id,
             pubsock,
             monsock,
-            in_conn_num: in_conns
+            in_accepted_num,
+            in_handshake_succeeded_num,
+            in_disconnected_num
         }
     }
 
@@ -664,10 +671,13 @@ impl Efunguz {
                 if event_msg[0].len() >= 2 {
                     let event_num = u16::from_le_bytes([event_msg[0][0], event_msg[0][1]]);
                     if ((event_num as c_int) & ZMQ_EVENT_ACCEPTED) != 0 {
-                        self.in_conn_num += 1;
+                        self.in_accepted_num += 1;
                     }
-                    if (((event_num as c_int) & ZMQ_EVENT_DISCONNECTED) != 0) && (self.in_conn_num > 0) {
-                        self.in_conn_num -= 1;
+                    if ((event_num as c_int) & ZMQ_EVENT_HANDSHAKE_SUCCEEDED) != 0 {
+                        self.in_handshake_succeeded_num += 1;
+                    }
+                    if ((event_num as c_int) & ZMQ_EVENT_DISCONNECTED) != 0 {
+                        self.in_disconnected_num += 1;
                     } 
                 }
             }
@@ -675,8 +685,20 @@ impl Efunguz {
         }
     }
 
-    pub fn in_connections_num(&self) -> usize {
-        self.in_conn_num
+    pub fn in_attempted_num(&self) -> u64 {
+        self.in_accepted_num
+    }
+
+    pub fn in_permitted_num(&self) -> u64 {
+        self.in_handshake_succeeded_num
+    }
+
+    pub fn in_absorbing_num(&self) -> u64 { // may temporarily exceed number of actually subscribed peers, until disconnection due to failed auth
+        if self.in_accepted_num >= self.in_disconnected_num {
+            self.in_accepted_num - self.in_disconnected_num
+        } else {
+            0
+        }
     }
 
 }
